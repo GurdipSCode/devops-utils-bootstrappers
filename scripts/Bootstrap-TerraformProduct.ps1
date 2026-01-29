@@ -1,5 +1,5 @@
 # Multi-Platform Project Provisioning Script
-# Creates namespaces in Vault, project in Lynx, and projects in Harbor
+# Creates namespaces in Vault, project in Lynx, and projects in Harbor - for Terraform Modules
 
 param(
     [Parameter(Mandatory=$true)]
