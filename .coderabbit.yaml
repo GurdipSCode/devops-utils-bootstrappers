@@ -1,0 +1,131 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+
+tone_instructions: |
+  Be concise and direct. Focus on security, reliability, and maintainability 
+  for infrastructure provisioning scripts.
+
+early_access: false
+
+enable_free_tier: true
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  auto_title_placeholder: "@coderabbitai"
+  review_status: true
+  commit_status: true
+  poem: false
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  changed_files_summary: true
+  labeling_instructions: []
+  
+  path_filters:
+    - "**/*.ps1"
+    - "**/*.psm1"
+    - "**/*.psd1"
+  
+  path_instructions:
+    - path: "**/*.ps1"
+      instructions: |
+        Review PowerShell bootstrap/provisioning scripts with focus on:
+        
+        **Security:**
+        - Check for hardcoded secrets, tokens, passwords, or API keys
+        - Verify secrets are loaded from environment variables or secure vaults
+        - Ensure sensitive data is not logged or written to output
+        - Check for proper credential handling (SecureString, PSCredential)
+        - Verify HTTPS is used for all API endpoints
+        - Check for command injection vulnerabilities in dynamic commands
+        
+        **Error Handling:**
+        - Verify $ErrorActionPreference is set appropriately
+        - Check for proper try/catch blocks around API calls
+        - Ensure errors are logged with sufficient context
+        - Verify failed operations don't leave resources in inconsistent state
+        - Check for proper cleanup in finally blocks if needed
+        
+        **API Interactions:**
+        - Verify proper HTTP methods (GET, POST, PUT, PATCH, DELETE)
+        - Check for proper headers (Authorization, Content-Type)
+        - Ensure response status codes are validated
+        - Check for rate limiting considerations
+        - Verify idempotency - scripts should be safe to run multiple times
+        
+        **Code Quality:**
+        - Check for proper parameter validation and typing
+        - Verify functions follow PowerShell naming conventions (Verb-Noun)
+        - Ensure consistent error output formatting
+        - Check for proper use of Write-Verbose, Write-Warning, Write-Error
+        - Verify mandatory parameters don't have default values (or vice versa)
+        
+        **Infrastructure Provisioning:**
+        - Verify resources are checked for existence before creation
+        - Ensure proper namespace/path handling for Vault, Buildkite, etc.
+        - Check for proper cleanup of temporary resources
+        - Verify rollback capability for failed multi-step operations
+        
+        **Maintainability:**
+        - Check for magic strings that should be constants or parameters
+        - Verify sufficient commenting for complex logic
+        - Ensure functions are modular and reusable
+        - Check for duplicate code that could be refactored
+
+    - path: "**/*.psm1"
+      instructions: |
+        Review PowerShell modules with focus on:
+        - Proper Export-ModuleMember usage
+        - Function organization and naming
+        - Module manifest alignment
+        - Dependency management
+
+    - path: "**/*.psd1"
+      instructions: |
+        Review PowerShell module manifests with focus on:
+        - Correct version numbering
+        - Proper function exports
+        - Required module dependencies
+        - Author and description metadata
+
+  abort_on_close: true
+  
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "DRAFT"
+    drafts: false
+    base_branches:
+      - main
+      - master
+      - develop
+
+  tools:
+    shellcheck:
+      enabled: false
+    
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
+  pull_requests:
+    scope: auto
