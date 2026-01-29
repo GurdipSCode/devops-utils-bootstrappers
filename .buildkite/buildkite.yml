@@ -1,1 +1,26 @@
+steps:
+  - label: "🔍 Lint PowerShell"
+    command: |
+      pwsh -NoProfile -Command "
+        Invoke-ScriptAnalyzer -Path . -Recurse -EnableExit
+      "
+    agents:
+      queue: "windows"
 
+  - label: "🛡️ Semgrep Scan"
+    command: "semgrep scan --config auto --error"
+    agents:
+      queue: "default"
+
+  - label: "🔐 GitGuardian Scan"
+    command: "ggshield secret scan ci"
+    env:
+      GITGUARDIAN_API_KEY: "${GITGUARDIAN_API_KEY}"
+    agents:
+      queue: "default"
+
+  - label: "📝 Generate Changelog"
+    command: "git-cliff --output CHANGELOG.md"
+    branches: "main"
+    agents:
+      queue: "default"
