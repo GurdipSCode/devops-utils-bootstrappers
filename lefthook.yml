@@ -1,0 +1,24 @@
+# Lefthook configuration for PowerShell linting
+# https://github.com/evilmartians/lefthook
+#
+# Prerequisites:
+#   - PowerShell 7+ (pwsh)
+#   - PSScriptAnalyzer: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+#   - Pester (for tests): Install-Module -Name Pester -Force -Scope CurrentUser
+
+pre-commit:
+  parallel: true
+  commands:
+    pwsh-lint:
+      glob: "*.{ps1,psm1,psd1}"
+      run: pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -Path {staged_files} -Severity Warning,Error -EnableExit"
+
+    pwsh-syntax:
+      glob: "*.{ps1,psm1}"
+      run: pwsh -NoProfile -Command "$files = @({staged_files}); foreach ($f in $files) { $null = [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$errors); if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 } }"
+
+pre-push:
+  commands:
+    pwsh-tests:
+      glob: "*.Tests.ps1"
+      run: pwsh -NoProfile -Command "Invoke-Pester -Path . -PassThru | Where-Object { $_.FailedCount -gt 0 } | ForEach-Object { exit 1 }"
