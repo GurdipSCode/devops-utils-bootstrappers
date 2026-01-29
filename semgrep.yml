@@ -1,0 +1,22 @@
+# Semgrep configuration
+# https://semgrep.dev/docs/
+#
+# Run with: semgrep --config semgrep.yml .
+
+rules:
+  # Include rules from your GitHub repository
+  # Replace with your actual repo URL
+  - r: https://github.com/YOUR_USERNAME/YOUR_REPO/blob/main/rules
+  
+  # Or use the raw format for specific rule files
+  # - r: https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/rules/security.yml
+  # - r: https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/rules/custom.yml
+
+# Alternative: Use .semgrepconfig.yml or pyproject.toml for CI configuration
+# If using semgrep ci, you can also configure via environment variables or CLI:
+#
+#   semgrep ci --config https://github.com/YOUR_USERNAME/YOUR_REPO
+#
+# Or in your CI pipeline:
+#
+#   semgrep scan --config p/default --config https://github.com/YOUR_USERNAME/YOUR_REPO/blob/main/rules
