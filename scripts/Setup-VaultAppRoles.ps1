@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 # ============================================================================
-# Bootstrap-TerraformServices.ps1
-# Creates AppRole auth, policies, and roles for Terraform services. Stores Lynx credentials in Vault. Stores Vault roleid and secretid in Buildkite secret variables.
+# Setup-VaultAppRoles.ps1
+# Creates AppRole auth, policies, and roles for Terraform services
 # Stores role_id and secret_id in Buildkite pipeline environment variables
 # ============================================================================
 #
