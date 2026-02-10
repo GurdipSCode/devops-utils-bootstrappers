@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 # ============================================================================
 # Setup-VaultAppRoles.ps1
-# Creates AppRole auth, policies, and roles for Terraform services
+# Creates AppRole auth, policies, and roles for Terraform services AND modules
 # Stores role_id and secret_id in Buildkite pipeline environment variables
 # ============================================================================
 #
@@ -21,9 +21,6 @@ param(
     
     [Parameter(Mandatory=$false)]
     [string]$VaultToken = "hvs.vwcrYLioLRZBO3tbsplBAMzA",
-    
-    [Parameter(Mandatory=$false)]
-    [string]$RootNamespace = "DevOps/terraform-services",
     
     [Parameter(Mandatory=$false)]
     [string]$KvMount = "secret",
@@ -48,6 +45,36 @@ $ErrorActionPreference = "Stop"
 # ============================================================================
 
 $services = @(
+    "axiom",
+    "buildkite",
+    "cloudflare",
+    "netlify",
+    "ngrok",
+    "teamcity",
+    "octopusdeploy",
+    "splunk",
+    "elastic",
+    "netbox",
+    "vmware",
+    "argocd",
+    "cloudsmith",
+    "terrapwner",
+    "mondoo",
+    "grafana",
+    "gns3",
+    "lynx",
+    "archestra",
+    "kestra",
+    "nirmata",
+    "checkly",
+    "portio",
+    "sentry",
+    "tailscale",
+    "vault",
+    "harbor"
+)
+
+$modules = @(
     "axiom",
     "buildkite",
     "cloudflare",
@@ -312,7 +339,7 @@ function New-AppRoleSecretId {
 
 function Set-BuildkiteSecret {
     param(
-        [string]$ServiceName,
+        [string]$PipelineName,
         [string]$Key,
         [string]$Value
     )
@@ -326,9 +353,6 @@ function Set-BuildkiteSecret {
         Write-Host "    ⚠️ Buildkite not configured, skipping: $Key" -ForegroundColor Yellow
         return $false
     }
-    
-    # Pipeline name for restriction
-    $pipelineName = "devops-terraform-services-$ServiceName"
     
     # Cluster secrets endpoint
     $secretsUri = "https://api.buildkite.com/v2/organizations/$BuildkiteOrg/clusters/$BuildkiteClusterId/secrets"
@@ -357,7 +381,7 @@ function Set-BuildkiteSecret {
     }
     
     # Body with pipeline restriction
-    $body = "{`"key`":`"$Key`",`"value`":`"$Value`",`"rules`":[{`"type`":`"pipeline`",`"value`":`"pipeline.slug == '$pipelineName'`"}]}"
+    $body = "{`"key`":`"$Key`",`"value`":`"$Value`",`"rules`":[{`"type`":`"pipeline`",`"value`":`"pipeline.slug == '$PipelineName'`"}]}"
     $tempFile = [System.IO.Path]::GetTempFileName()
     [System.IO.File]::WriteAllText($tempFile, $body, (New-Object System.Text.UTF8Encoding $false))
     
@@ -372,7 +396,7 @@ function Set-BuildkiteSecret {
                 $updateUri 2>$null
             
             if ($response -match '"key"' -or $response -match '"uuid"' -or $response -match '"id"') {
-                Write-Success "Updated cluster secret: $Key (restricted to: $pipelineName)"
+                Write-Success "Updated cluster secret: $Key (restricted to: $PipelineName)"
                 $script:buildkiteSecretsCreated++
                 return $true
             }
@@ -385,7 +409,7 @@ function Set-BuildkiteSecret {
                 $secretsUri 2>$null
             
             if ($response -match '"key"' -or $response -match '"uuid"' -or $response -match '"id"') {
-                Write-Success "Created cluster secret: $Key (restricted to: $pipelineName)"
+                Write-Success "Created cluster secret: $Key (restricted to: $PipelineName)"
                 $script:buildkiteSecretsCreated++
                 return $true
             }
@@ -399,19 +423,111 @@ function Set-BuildkiteSecret {
 }
 
 # ============================================================================
+# GENERIC PROCESSING FUNCTION
+# ============================================================================
+
+function Process-VaultItems {
+    param(
+        [string]$Type,              # "service" or "module"
+        [string[]]$Items,           # list of names
+        [string]$RootNamespace,     # e.g. DevOps/terraform-services or DevOps/terraform-modules
+        [string]$PipelinePrefix     # e.g. devops-terraform-services or devops-terraform-modules
+    )
+    
+    $bkSecretPrefix = $PipelinePrefix.Replace('-', '_')  # e.g. devops_terraform_services or devops_terraform_modules
+    
+    foreach ($item in $Items) {
+        $itemNamespace = "$RootNamespace/$item"
+        $prdNamespace = "$itemNamespace/prd"
+        
+        Write-Header "$($Type): $item"
+        Write-Host "  Namespace: $prdNamespace" -ForegroundColor DarkGray
+        
+        # 1. Enable AppRole auth in the prd namespace
+        Write-Host "  → Enabling AppRole auth..." -ForegroundColor White
+        if (-not (Enable-AppRoleAuth -Namespace $prdNamespace)) {
+            Write-Failed "Could not enable AppRole, skipping $Type"
+            continue
+        }
+        
+        # 2. Create policy for reading/listing secrets
+        Write-Host "  → Creating policy..." -ForegroundColor White
+        $policyName = "terraform-$item-read"
+        $policyHcl = @"
+# Policy for terraform-$item ($Type)
+# Allows reading and listing secrets in the $KvMount mount
+
+# Read secrets
+path "$KvMount/data/*" {
+  capabilities = ["read", "list"]
+}
+
+# List secrets
+path "$KvMount/metadata/*" {
+  capabilities = ["read", "list"]
+}
+
+# Allow looking up own token
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+"@
+        
+        if (-not (New-VaultPolicy -Namespace $prdNamespace -PolicyName $policyName -PolicyHcl $policyHcl)) {
+            Write-Failed "Could not create policy, skipping $Type"
+            continue
+        }
+        
+        # 3. Create AppRole
+        Write-Host "  → Creating AppRole..." -ForegroundColor White
+        $roleName = "terraform-$item"
+        if (-not (New-AppRole -Namespace $prdNamespace -RoleName $roleName -Policies @($policyName))) {
+            Write-Failed "Could not create AppRole, skipping $Type"
+            continue
+        }
+        
+        # 4. Get role_id and generate secret_id
+        if (-not $DryRun) {
+            Write-Host "  → Retrieving credentials..." -ForegroundColor White
+            $roleId = Get-AppRoleId -Namespace $prdNamespace -RoleName $roleName
+            $secretId = New-AppRoleSecretId -Namespace $prdNamespace -RoleName $roleName
+            
+            if ($roleId -and $secretId) {
+                Write-Host "    Role ID:   $($roleId.Substring(0, 8))..." -ForegroundColor DarkGray
+                Write-Host "    Secret ID: $($secretId.Substring(0, 8))..." -ForegroundColor DarkGray
+                
+                # 5. Store in Buildkite
+                Write-Host "  → Storing in Buildkite..." -ForegroundColor White
+                $pipelineName = "$PipelinePrefix-$item"
+                $roleIdKey = "$($bkSecretPrefix)_$($item)_roleid"
+                $secretIdKey = "$($bkSecretPrefix)_$($item)_secretid"
+                
+                Set-BuildkiteSecret -PipelineName $pipelineName -Key $roleIdKey -Value $roleId | Out-Null
+                Set-BuildkiteSecret -PipelineName $pipelineName -Key $secretIdKey -Value $secretId | Out-Null
+            }
+        } else {
+            $pipelineName = "$PipelinePrefix-$item"
+            Write-Host "    [DRY RUN] Would retrieve role_id and secret_id" -ForegroundColor DarkGray
+            Write-Host "    [DRY RUN] Would store in Buildkite cluster:" -ForegroundColor DarkGray
+            Write-Host "      $($bkSecretPrefix)_$($item)_roleid (restricted to: $pipelineName)" -ForegroundColor DarkGray
+            Write-Host "      $($bkSecretPrefix)_$($item)_secretid (restricted to: $pipelineName)" -ForegroundColor DarkGray
+        }
+    }
+}
+
+# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
-Write-Header "Vault AppRole Setup Script"
+Write-Header "Vault AppRole Setup Script (Services + Modules)"
 
 Write-Host "`nConfiguration:" -ForegroundColor Yellow
 Write-Host "  Vault Address:      $VaultAddr"
-Write-Host "  Root Namespace:     $RootNamespace"
 Write-Host "  KV Mount:           $KvMount"
 Write-Host "  Buildkite Org:      $BuildkiteOrg"
 Write-Host "  Buildkite Cluster:  $BuildkiteClusterId"
-Write-Host "  Pipeline Pattern:   devops-terraform-services-{service}"
-Write-Host "  Services:           $($services.Count)"
+Write-Host "  Services:           $($services.Count)  (namespace: DevOps/terraform-services)"
+Write-Host "  Modules:            $($modules.Count)  (namespace: DevOps/terraform-modules)"
 Write-Host "  Dry Run:            $DryRun"
 
 if ($DryRun) {
@@ -447,82 +563,31 @@ if ($BuildkiteApiToken -and $BuildkiteOrg -and $BuildkiteClusterId) {
     Write-Host "  ⚠️ Buildkite not fully configured - will skip storing secrets" -ForegroundColor Yellow
 }
 
-# Process each service
-foreach ($service in $services) {
-    $serviceNamespace = "$RootNamespace/$service"
-    $prdNamespace = "$serviceNamespace/prd"
-    
-    Write-Header "Service: $service"
-    Write-Host "  Namespace: $prdNamespace" -ForegroundColor DarkGray
-    
-    # 1. Enable AppRole auth in the prd namespace
-    Write-Host "  → Enabling AppRole auth..." -ForegroundColor White
-    if (-not (Enable-AppRoleAuth -Namespace $prdNamespace)) {
-        Write-Failed "Could not enable AppRole, skipping service"
-        continue
-    }
-    
-    # 2. Create policy for reading/listing secrets
-    Write-Host "  → Creating policy..." -ForegroundColor White
-    $policyName = "terraform-$service-read"
-    $policyHcl = @"
-# Policy for terraform-$service
-# Allows reading and listing secrets in the $KvMount mount
+# ============================================================================
+# PROCESS SERVICES
+# ============================================================================
 
-# Read secrets
-path "$KvMount/data/*" {
-  capabilities = ["read", "list"]
-}
+Write-Header "Processing Terraform Services"
+Process-VaultItems `
+    -Type "Service" `
+    -Items $services `
+    -RootNamespace "DevOps/terraform-services" `
+    -PipelinePrefix "devops-terraform-services"
 
-# List secrets
-path "$KvMount/metadata/*" {
-  capabilities = ["read", "list"]
-}
+# ============================================================================
+# PROCESS MODULES
+# ============================================================================
 
-# Allow looking up own token
-path "auth/token/lookup-self" {
-  capabilities = ["read"]
-}
-"@
-    
-    if (-not (New-VaultPolicy -Namespace $prdNamespace -PolicyName $policyName -PolicyHcl $policyHcl)) {
-        Write-Failed "Could not create policy, skipping service"
-        continue
-    }
-    
-    # 3. Create AppRole
-    Write-Host "  → Creating AppRole..." -ForegroundColor White
-    $roleName = "terraform-$service"
-    if (-not (New-AppRole -Namespace $prdNamespace -RoleName $roleName -Policies @($policyName))) {
-        Write-Failed "Could not create AppRole, skipping service"
-        continue
-    }
-    
-    # 4. Get role_id and generate secret_id
-    if (-not $DryRun) {
-        Write-Host "  → Retrieving credentials..." -ForegroundColor White
-        $roleId = Get-AppRoleId -Namespace $prdNamespace -RoleName $roleName
-        $secretId = New-AppRoleSecretId -Namespace $prdNamespace -RoleName $roleName
-        
-        if ($roleId -and $secretId) {
-            Write-Host "    Role ID:   $($roleId.Substring(0, 8))..." -ForegroundColor DarkGray
-            Write-Host "    Secret ID: $($secretId.Substring(0, 8))..." -ForegroundColor DarkGray
-            
-            # 5. Store in Buildkite
-            Write-Host "  → Storing in Buildkite..." -ForegroundColor White
-            $roleIdKey = "devops_terraform_services_$($service)_roleid"
-            $secretIdKey = "devops_terraform_services_$($service)_secretid"
-            
-            Set-BuildkiteSecret -ServiceName $service -Key $roleIdKey -Value $roleId | Out-Null
-            Set-BuildkiteSecret -ServiceName $service -Key $secretIdKey -Value $secretId | Out-Null
-        }
-    } else {
-        Write-Host "    [DRY RUN] Would retrieve role_id and secret_id" -ForegroundColor DarkGray
-        Write-Host "    [DRY RUN] Would store in Buildkite cluster: $BuildkiteCluster" -ForegroundColor DarkGray
-        Write-Host "      devops_terraform_services_$($service)_roleid (restricted to: devops-terraform-services-$service)" -ForegroundColor DarkGray
-        Write-Host "      devops_terraform_services_$($service)_secretid (restricted to: devops-terraform-services-$service)" -ForegroundColor DarkGray
-    }
-}
+Write-Header "Processing Terraform Modules"
+Process-VaultItems `
+    -Type "Module" `
+    -Items $modules `
+    -RootNamespace "DevOps/terraform-modules" `
+    -PipelinePrefix "devops-terraform-modules"
+
+# ============================================================================
+# SUMMARY
+# ============================================================================
 
 Write-Header "Summary"
 Write-Host "`n  Vault:" -ForegroundColor White
@@ -540,7 +605,11 @@ if ($DryRun) {
 }
 
 Write-Host "`n📋 Buildkite Variable Names:" -ForegroundColor Cyan
-Write-Host "  devops_terraform_services_{service}_roleid" -ForegroundColor White
-Write-Host "  devops_terraform_services_{service}_secretid" -ForegroundColor White
+Write-Host "  Services:" -ForegroundColor White
+Write-Host "    devops_terraform_services_{service}_roleid" -ForegroundColor White
+Write-Host "    devops_terraform_services_{service}_secretid" -ForegroundColor White
+Write-Host "  Modules:" -ForegroundColor White
+Write-Host "    devops_terraform_modules_{module}_roleid" -ForegroundColor White
+Write-Host "    devops_terraform_modules_{module}_secretid" -ForegroundColor White
 
 exit $(if ($script:failed -gt 0) { 1 } else { 0 })
