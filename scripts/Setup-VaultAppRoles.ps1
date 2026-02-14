@@ -68,6 +68,10 @@ $services = @(
     "nirmata",
     "checkly",
     "portio",
+    "idrac",
+    "openmanage",
+    "vcf",
+    "nsx",
     "sentry",
     "tailscale",
     "vault",
@@ -101,7 +105,11 @@ $modules = @(
     "sentry",
     "tailscale",
     "vault",
-    "harbor"
+    "harbor",
+    "idrac",
+    "openmanage",
+    "nsx",
+    "vcf"
 )
 
 # ============================================================================
